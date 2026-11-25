@@ -1,0 +1,14 @@
+{
+  "name": "Curvas de Nível",
+  "short_name": "Curvas",
+  "description": "Desenhe um polígono no mapa de satélite e gere curvas de nível (SRTM).",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f1ea",
+  "theme_color": "#1f3b2d",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

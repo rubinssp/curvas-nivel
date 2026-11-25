@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Curvas de Nível</title>
+<meta name="theme-color" content="#1f3b2d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { --verde:#1f3b2d; --verde2:#2f5a44; --laranja:#ff8c1a; --amarelo:#ffd27a; --fundo:#f4f1ea; --texto:#1d1d1b; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--texto); }
+  body { display:flex; flex-direction:column; }
+  header { background:var(--verde); color:#fff; padding:8px 12px; display:flex; align-items:center; gap:10px; }
+  header h1 { font-size:17px; margin:0; font-weight:600; flex:1; }
+  header small { opacity:.75; font-size:11px; }
+  #map { flex:1; min-height:200px; }
+  #painel { background:var(--fundo); border-top:2px solid var(--verde2); max-height:48vh; overflow:auto; padding:10px 12px 14px; }
+  .linha { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:8px; }
+  button, .btn { border:0; border-radius:8px; padding:9px 12px; font-size:14px; background:var(--verde2); color:#fff; cursor:pointer; font-weight:500; }
+  button.sec { background:#fff; color:var(--verde); border:1px solid var(--verde2); }
+  button.alerta { background:#a33; }
+  button.ativo { background:var(--laranja); }
+  button:disabled { opacity:.45; cursor:default; }
+  label { font-size:13px; display:flex; align-items:center; gap:4px; }
+  select, input[type=number], input[type=text] { padding:6px; font-size:14px; border:1px solid #bbb; border-radius:6px; background:#fff; }
+  input[type=number] { width:70px; }
+  #status { font-size:13px; margin:4px 0 8px; min-height:18px; }
+  #status.erro { color:#a33; font-weight:600; }
+  table.res { border-collapse:collapse; font-size:13px; margin:4px 0 8px; }
+  table.res td { padding:2px 10px 2px 0; }
+  table.res td:first-child { color:#555; }
+  .aviso { font-size:11.5px; color:#6b5a2e; background:#fff6dc; border:1px solid #ecd9a0; border-radius:6px; padding:6px 8px; margin-top:6px; line-height:1.35; }
+  details summary { cursor:pointer; font-size:13px; font-weight:600; margin:6px 0; }
+  .lbl { background:none; border:0; }
+  .lbl span { display:inline-block; transform:translate(-50%,-50%); font:600 11px system-ui, sans-serif; color:#fff; text-shadow:0 0 3px #000, 0 0 2px #000; white-space:nowrap; }
+  .vert { width:14px; height:14px; border-radius:50%; background:#fff; border:3px solid var(--laranja); margin:-7px 0 0 -7px; }
+  .vert.primeiro { background:var(--laranja); }
+  #legenda { position:absolute; z-index:500; right:10px; top:60px; background:rgba(255,255,255,.92); padding:6px 8px; border-radius:6px; font-size:12px; display:none; box-shadow:0 1px 4px rgba(0,0,0,.3); }
+  #legenda i { display:inline-block; width:22px; vertical-align:middle; margin-right:5px; }
+  #fileKml { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <svg width="26" height="26" viewBox="0 0 64 64" aria-hidden="true"><path d="M6 46c10-6 18-6 26 0s16 6 26 0M10 34c8-5 14-5 22 0s14 5 22 0M18 22c5-3 9-3 14 0s9 3 14 0" fill="none" stroke="#ffd27a" stroke-width="4" stroke-linecap="round"/></svg>
+  <h1>Curvas de Nível <small>desenhe um polígono → curvas</small></h1>
+</header>
+
+<div id="map"></div>
+<div id="legenda">
+  <div><i style="border-top:3px solid var(--laranja)"></i>Curva mestra</div>
+  <div><i style="border-top:1.5px solid var(--amarelo)"></i>Curva intermediária</div>
+</div>
+
+<div id="painel">
+  <div class="linha">
+    <button id="btDesenhar">✏️ Desenhar polígono</button>
+    <button id="btDesfazer" class="sec" disabled>↶ Desfazer ponto</button>
+    <button id="btConcluir" class="sec" disabled>✔ Concluir</button>
+    <button id="btLimpar" class="sec">🗑 Limpar</button>
+    <button id="btImportar" class="sec">📂 Importar KML/GeoJSON</button>
+    <input type="file" id="fileKml" accept=".kml,.geojson,.json">
+    <button id="btGps" class="sec">📍 Minha posição</button>
+  </div>
+
+  <div class="linha">
+    <label>Equidistância
+      <select id="eq">
+        <option value="0.5">0,5 m</option>
+        <option value="1">1 m</option>
+        <option value="2">2 m</option>
+        <option value="5" selected>5 m</option>
+        <option value="10">10 m</option>
+        <option value="20">20 m</option>
+        <option value="50">50 m</option>
+      </select>
+    </label>
+    <label>Mestra a cada <input type="number" id="mestra" value="5" min="1" max="20" step="1"> curvas</label>
+    <label>Suavização
+      <select id="suav">
+        <option value="0">Nenhuma</option>
+        <option value="2">Leve</option>
+        <option value="5" selected>Média</option>
+        <option value="10">Forte</option>
+        <option value="20">Muito forte</option>
+      </select>
+    </label>
+    <button id="btGerar" disabled>⛰️ Gerar curvas</button>
+  </div>
+
+  <div id="status">Toque em “Desenhar polígono” e marque os vértices no mapa.</div>
+
+  <div id="resultado" style="display:none">
+    <table class="res" id="tabRes"></table>
+    <div class="linha">
+      <label>Nome <input type="text" id="nome" value="area" style="width:140px"></label>
+      <button id="btKml" class="sec">⬇ KML</button>
+      <button id="btGeojson" class="sec">⬇ GeoJSON</button>
+      <button id="btDxf" class="sec">⬇ DXF (UTM)</button>
+      <button id="btCsv" class="sec">⬇ Pontos XYZ (CSV)</button>
+    </div>
+  </div>
+
+  <details>
+    <summary>Sobre os dados</summary>
+    <div class="aviso">
+      <b>Imagem de fundo:</b> Esri World Imagery (só visual — imagem não tem altitude).<br>
+      <b>Altitudes:</b> AWS Terrain Tiles (formato Terrarium), que no Brasil vêm principalmente do <b>SRTM de ~30 m</b>.
+      Precisão vertical típica de alguns metros, e o modelo mede o topo da vegetação e das construções (é um MDS, não um MDT).
+      Equidistâncias abaixo de 5 m mostram mais o formato do terreno do que cotas confiáveis.<br>
+      Serve para <b>estudos preliminares, croquis e planejamento</b>. Não substitui levantamento topográfico (GNSS RTK, estação total ou drone com GCPs).<br>
+      Precisa de internet para baixar a imagem e as altitudes.
+    </div>
+  </details>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="curvas.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = window.Curvas;
+  var $ = function (id) { return document.getElementById(id); };
+
+  // ---------------- Mapa ----------------
+  var map = L.map('map', { zoomControl: true }).setView([-29.32, -53.38], 13);
+  var esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 21, maxNativeZoom: 19, attribution: 'Imagem © Esri, Maxar, Earthstar Geographics'
+  }).addTo(map);
+  var rotulos = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 21, maxNativeZoom: 19, attribution: ''
+  }).addTo(map);
+  var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 21, maxNativeZoom: 19, attribution: '© OpenStreetMap' });
+  var topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 21, maxNativeZoom: 17, attribution: '© OpenTopoMap (CC-BY-SA)' });
+  L.control.layers({ 'Satélite (Esri)': esri, 'OpenStreetMap': osm, 'OpenTopoMap': topo }, { 'Nomes e limites': rotulos }, { position: 'topright' }).addTo(map);
+  L.control.scale({ imperial: false }).addTo(map);
+  map.attributionControl.addAttribution('Altitudes: AWS Terrain Tiles (SRTM)');
+
+  // ---------------- Estado ----------------
+  var vertices = [];         // [L.LatLng]
+  var marcadores = [];
+  var linhaDesenho = null;   // polyline/polígono em desenho
+  var poligono = null;       // L.Polygon final
+  var desenhando = false;
+  var camadaCurvas = L.layerGroup().addTo(map);
+  var camadaRotulos = L.layerGroup().addTo(map);
+  var ultimo = null;         // resultado do último cálculo
+
+  function status(msg, erro) { var s = $('status'); s.textContent = msg; s.className = erro ? 'erro' : ''; }
+
+  // ---------------- Desenho ----------------
+  function iconeVert(primeiro) { return L.divIcon({ className: '', html: '<div class="vert' + (primeiro ? ' primeiro' : '') + '"></div>', iconSize: [0, 0] }); }
+
+  function redesenhar() {
+    marcadores.forEach(function (m) { map.removeLayer(m); });
+    marcadores = [];
+    if (linhaDesenho) { map.removeLayer(linhaDesenho); linhaDesenho = null; }
+    if (poligono) { map.removeLayer(poligono); poligono = null; }
+    if (!vertices.length) { atualizarBotoes(); return; }
+    if (desenhando) {
+      linhaDesenho = L.polyline(vertices, { color: '#ff8c1a', weight: 2.5, dashArray: '6 5' }).addTo(map);
+    } else {
+      poligono = L.polygon(vertices, { color: '#ff8c1a', weight: 2.5, fill: true, fillOpacity: 0.06, interactive: false }).addTo(map);
+    }
+    vertices.forEach(function (ll, i) {
+      var m = L.marker(ll, { icon: iconeVert(i === 0), draggable: true, keyboard: false }).addTo(map);
+      m.on('drag', function (e) { vertices[i] = e.target.getLatLng(); (linhaDesenho || poligono).setLatLngs(vertices); });
+      m.on('dragend', function () { limparCurvas(); salvarPoligono(); });
+      m.on('click', function () { if (desenhando && i === 0 && vertices.length >= 3) concluir(); });
+      marcadores.push(m);
+    });
+    atualizarBotoes();
+  }
+
+  function atualizarBotoes() {
+    $('btDesenhar').classList.toggle('ativo', desenhando);
+    $('btDesfazer').disabled = !desenhando || !vertices.length;
+    $('btConcluir').disabled = !desenhando || vertices.length < 3;
+    $('btGerar').disabled = desenhando || vertices.length < 3;
+  }
+
+  function iniciarDesenho() {
+    limparTudo();
+    desenhando = true;
+    map.getContainer().style.cursor = 'crosshair';
+    status('Toque no mapa para marcar os vértices. Toque no primeiro ponto ou em “Concluir” para fechar.');
+    atualizarBotoes();
+  }
+
+  function concluir() {
+    if (vertices.length < 3) return;
+    desenhando = false;
+    map.getContainer().style.cursor = '';
+    redesenhar();
+    salvarPoligono();
+    status('Polígono pronto (' + formatarArea(areaM2()) + '). Arraste os vértices para ajustar e toque em “Gerar curvas”.');
+  }
+
+  function limparCurvas() { camadaCurvas.clearLayers(); camadaRotulos.clearLayers(); ultimo = null; $('resultado').style.display = 'none'; $('legenda').style.display = 'none'; }
+  function limparTudo() { desenhando = false; vertices = []; limparCurvas(); redesenhar(); map.getContainer().style.cursor = ''; salvarPoligono(); }
+
+  map.on('click', function (e) {
+    if (desenhando) { vertices.push(e.latlng); redesenhar(); return; }
+    // consulta de altitude dentro do grid calculado
+    if (ultimo) {
+      var z = altitudeEm(e.latlng);
+      if (z != null) L.popup().setLatLng(e.latlng).setContent('<b>' + z.toFixed(1) + ' m</b><br><small>altitude do modelo (SRTM)</small>').openOn(map);
+    }
+  });
+
+  $('btDesenhar').onclick = function () { if (desenhando) { concluir(); } else iniciarDesenho(); };
+  $('btDesfazer').onclick = function () { vertices.pop(); redesenhar(); };
+  $('btConcluir').onclick = concluir;
+  $('btLimpar').onclick = function () { limparTudo(); status('Toque em “Desenhar polígono” e marque os vértices no mapa.'); };
+
+  $('btGps').onclick = function () {
+    if (!navigator.geolocation) return status('GPS não disponível neste aparelho.', true);
+    status('Buscando posição…');
+    navigator.geolocation.getCurrentPosition(function (p) {
+      map.setView([p.coords.latitude, p.coords.longitude], 17);
+      L.circleMarker([p.coords.latitude, p.coords.longitude], { radius: 7, color: '#fff', weight: 2, fillColor: '#2a7de1', fillOpacity: 1 }).addTo(map);
+      status('Posição encontrada (±' + Math.round(p.coords.accuracy) + ' m).');
+    }, function (err) { status('Não foi possível obter a posição: ' + err.message, true); }, { enableHighAccuracy: true, timeout: 15000 });
+  };
+
+  // ---------------- Importar ----------------
+  $('btImportar').onclick = function () { $('fileKml').click(); };
+  $('fileKml').onchange = function (ev) {
+    var f = ev.target.files[0]; if (!f) return;
+    var r = new FileReader();
+    r.onload = function () {
+      try {
+        var coords = /\.kml$/i.test(f.name) ? lerKml(r.result) : lerGeojson(JSON.parse(r.result));
+        if (!coords || coords.length < 3) throw new Error('nenhum polígono encontrado no arquivo');
+        limparTudo();
+        vertices = coords.map(function (c) { return L.latLng(c[1], c[0]); });
+        concluir();
+        map.fitBounds(L.latLngBounds(vertices), { padding: [30, 30] });
+        $('nome').value = f.name.replace(/\.[^.]+$/, '');
+      } catch (e) { status('Erro ao importar: ' + e.message, true); }
+      ev.target.value = '';
+    };
+    r.readAsText(f);
+  };
+  function parseCoordStr(s) {
+    return s.trim().split(/\s+/).map(function (t) { var p = t.split(','); return [parseFloat(p[0]), parseFloat(p[1])]; })
+      .filter(function (p) { return isFinite(p[0]) && isFinite(p[1]); });
+  }
+  function lerKml(txt) {
+    var doc = new DOMParser().parseFromString(txt, 'text/xml');
+    var pol = doc.getElementsByTagName('Polygon')[0], el;
+    if (pol) { var ob = pol.getElementsByTagName('outerBoundaryIs')[0] || pol; el = ob.getElementsByTagName('coordinates')[0]; }
+    else { el = doc.getElementsByTagName('coordinates')[0]; } // LineString/LinearRing
+    return el ? semFechamento(parseCoordStr(el.textContent)) : null;
+  }
+  function lerGeojson(gj) {
+    var geoms = [];
+    (function walk(o) {
+      if (!o) return;
+      if (o.type === 'FeatureCollection') o.features.forEach(walk);
+      else if (o.type === 'Feature') walk(o.geometry);
+      else geoms.push(o);
+    })(gj);
+    for (var i = 0; i < geoms.length; i++) {
+      var g = geoms[i];
+      if (g.type === 'Polygon') return semFechamento(g.coordinates[0]);
+      if (g.type === 'MultiPolygon') return semFechamento(g.coordinates[0][0]);
+      if (g.type === 'LineString') return semFechamento(g.coordinates);
+    }
+    return null;
+  }
+  function semFechamento(c) {
+    if (c.length > 1 && c[0][0] === c[c.length - 1][0] && c[0][1] === c[c.length - 1][1]) c = c.slice(0, -1);
+    return c;
+  }
+
+  // ---------------- Salvar polígono no aparelho ----------------
+  function salvarPoligono() {
+    try { localStorage.setItem('curvas.poligono', JSON.stringify(desenhando ? [] : vertices.map(function (v) { return [v.lat, v.lng]; }))); } catch (e) {}
+  }
+  try {
+    var salvo = JSON.parse(localStorage.getItem('curvas.poligono') || '[]');
+    if (salvo.length >= 3) {
+      vertices = salvo.map(function (p) { return L.latLng(p[0], p[1]); });
+      redesenhar();
+      map.fitBounds(L.latLngBounds(vertices), { padding: [30, 30] });
+      status('Polígono anterior recuperado. Toque em “Gerar curvas” ou desenhe outro.');
+    }
+  } catch (e) {}
+
+  // ---------------- Área / UTM ----------------
+  function fusoAtual() {
+    var lon = 0; vertices.forEach(function (v) { lon += v.lng; }); return C.fusoDe(lon / vertices.length);
+  }
+  function areaM2() {
+    var fuso = fusoAtual();
+    return C.areaPlana(vertices.map(function (v) { return C.utm(v.lat, v.lng, fuso); }));
+  }
+  function formatarArea(m2) {
+    return m2 >= 10000 ? (m2 / 10000).toLocaleString('pt-BR', { maximumFractionDigits: 4 }) + ' ha'
+                       : m2.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' m²';
+  }
+  function fmt(n, d) { return n.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }); }
+
+  // ---------------- Altitudes (Terrarium) ----------------
+  var URL_DEM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
+
+  function carregarTile(z, x, y) {
+    return new Promise(function (ok, falha) {
+      var img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = function () { ok(img); };
+      img.onerror = function () { falha(new Error('falha ao baixar altitude ' + z + '/' + x + '/' + y)); };
+      img.src = URL_DEM.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+    });
+  }
+
+  function escolherZoom(bounds) {
+    for (var z = 15; z >= 6; z--) {
+      var x0 = C.lonToPx(bounds.getWest(), z), x1 = C.lonToPx(bounds.getEast(), z);
+      var y0 = C.latToPx(bounds.getNorth(), z), y1 = C.latToPx(bounds.getSouth(), z);
+      var nt = (Math.floor(x1 / 256) - Math.floor(x0 / 256) + 1) * (Math.floor(y1 / 256) - Math.floor(y0 / 256) + 1);
+      if ((x1 - x0) * (y1 - y0) <= 2.5e6 && nt <= 64) return z;
+    }
+    return null;
+  }
+
+  async function obterGrid() {
+    var b = L.latLngBounds(vertices);
+    var z = escolherZoom(b);
+    if (z == null) throw new Error('polígono grande demais — desenhe uma área menor');
+    var MARGEM = 4;
+    var gx0 = Math.floor(C.lonToPx(b.getWest(), z)) - MARGEM, gx1 = Math.ceil(C.lonToPx(b.getEast(), z)) + MARGEM;
+    var gy0 = Math.floor(C.latToPx(b.getNorth(), z)) - MARGEM, gy1 = Math.ceil(C.latToPx(b.getSouth(), z)) + MARGEM;
+    var tx0 = Math.floor(gx0 / 256), tx1 = Math.floor(gx1 / 256), ty0 = Math.floor(gy0 / 256), ty1 = Math.floor(gy1 / 256);
+    var cv = document.createElement('canvas');
+    cv.width = (tx1 - tx0 + 1) * 256; cv.height = (ty1 - ty0 + 1) * 256;
+    var ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.imageSmoothingEnabled = false;
+    var tarefas = [], total = (tx1 - tx0 + 1) * (ty1 - ty0 + 1), feitos = 0;
+    for (var ty = ty0; ty <= ty1; ty++) for (var tx = tx0; tx <= tx1; tx++) {
+      (function (tx, ty) {
+        tarefas.push(carregarTile(z, tx, ty).then(function (img) {
+          ctx.drawImage(img, (tx - tx0) * 256, (ty - ty0) * 256);
+          feitos++; status('Baixando altitudes… ' + feitos + '/' + total);
+        }));
+      })(tx, ty);
+    }
+    await Promise.all(tarefas);
+    var w = gx1 - gx0 + 1, h = gy1 - gy0 + 1;
+    var data = ctx.getImageData(gx0 - tx0 * 256, gy0 - ty0 * 256, w, h).data;
+    var grid = new Float32Array(w * h);
+    for (var i = 0; i < w * h; i++) grid[i] = C.terrarium(data[i * 4], data[i * 4 + 1], data[i * 4 + 2]);
+    return { z: z, gx0: gx0, gy0: gy0, w: w, h: h, bruto: grid };
+  }
+
+  // grid (índice) <-> lat/lng: o nó (i,j) é o centro do pixel global (gx0+i+0.5, gy0+j+0.5)
+  function gridParaLatLng(g, x, y) { return [C.pxToLat(g.gy0 + y + 0.5, g.z), C.pxToLon(g.gx0 + x + 0.5, g.z)]; }
+  function latLngParaGrid(g, lat, lng) { return [C.lonToPx(lng, g.z) - g.gx0 - 0.5, C.latToPx(lat, g.z) - g.gy0 - 0.5]; }
+
+  function altitudeEm(ll) {
+    var g = ultimo.g, p = latLngParaGrid(g, ll.lat, ll.lng), x = p[0], y = p[1];
+    if (x < 0 || y < 0 || x > g.w - 1 || y > g.h - 1) return null;
+    var x0 = Math.floor(x), y0 = Math.floor(y), x1 = Math.min(x0 + 1, g.w - 1), y1 = Math.min(y0 + 1, g.h - 1), fx = x - x0, fy = y - y0, G = g.grid, w = g.w;
+    return G[y0 * w + x0] * (1 - fx) * (1 - fy) + G[y0 * w + x1] * fx * (1 - fy) + G[y1 * w + x0] * (1 - fx) * fy + G[y1 * w + x1] * fx * fy;
+  }
+
+  // ---------------- Gerar ----------------
+  var gridCache = null, chaveCache = '';
+
+  $('btGerar').onclick = async function () {
+    if (vertices.length < 3) return;
+    var bt = this; bt.disabled = true;
+    limparCurvas();
+    try {
+      var chave = vertices.map(function (v) { return v.lat.toFixed(7) + ',' + v.lng.toFixed(7); }).join(';');
+      if (chave !== chaveCache) { gridCache = await obterGrid(); chaveCache = chave; }
+      var g = gridCache;
+      status('Calculando curvas…');
+      await new Promise(function (r) { setTimeout(r, 30); });
+
+      var eq = parseFloat($('eq').value), mestraCada = Math.max(1, parseInt($('mestra').value, 10) || 5);
+      // suavização: passes proporcionais à resolução (zoom 15 ≈ 4 m/px; SRTM ≈ 30 m)
+      var nivel = parseInt($('suav').value, 10);
+      var fatorRes = Math.pow(2, Math.max(0, g.z - 12)) / 8; // 1 em z15, 0,5 em z14…
+      var passes = Math.round(nivel * Math.max(fatorRes, 0.125) * 1.0);
+      if (nivel > 0 && passes < 1) passes = 1;
+      var grid = passes ? C.suavizar(g.bruto, g.w, g.h, passes) : g.bruto;
+      var polyGrid = vertices.map(function (v) { return latLngParaGrid(g, v.lat, v.lng); });
+
+      var t0 = performance.now();
+      var r = C.gerar({ grid: grid, w: g.w, h: g.h, poly: polyGrid, equidistancia: eq, mestraCada: mestraCada, tolerancia: 0.2 });
+      var nLinhas = 0;
+      r.curvas.forEach(function (c) { nLinhas += c.linhas.length; });
+
+      // converte para lat/lng
+      r.curvas.forEach(function (c) {
+        c.ll = c.linhas.map(function (l) { return l.map(function (p) { return gridParaLatLng(g, p[0], p[1]); }); });
+      });
+      ultimo = { g: { z: g.z, gx0: g.gx0, gy0: g.gy0, w: g.w, h: g.h, grid: grid }, r: r, eq: eq, mestraCada: mestraCada };
+
+      desenharCurvas(r);
+      mostrarResultado(g, r, eq, mestraCada, passes, nLinhas, performance.now() - t0);
+      status(r.curvas.length ? 'Curvas geradas. Toque no mapa para ver a altitude de um ponto.' : 'Nenhuma curva cruzou o polígono com essa equidistância — tente uma menor.', !r.curvas.length);
+    } catch (e) {
+      console.error(e);
+      status('Erro: ' + e.message + '. Verifique a internet e tente de novo.', true);
+    }
+    bt.disabled = false;
+  };
+
+  function desenharCurvas(r) {
+    var rotulosN = 0;
+    r.curvas.forEach(function (c) {
+      c.ll.forEach(function (l) {
+        L.polyline(l, c.mestra ? { color: '#ff8c1a', weight: 2.6, opacity: 0.95 } : { color: '#ffd27a', weight: 1.3, opacity: 0.9 })
+          .bindTooltip(fmt(c.cota, c.cota % 1 ? 1 : 0) + ' m', { sticky: true }).addTo(camadaCurvas);
+        if (c.mestra && l.length > 8 && rotulosN < 300) {
+          var meio = l[Math.floor(l.length / 2)];
+          L.marker(meio, { interactive: false, icon: L.divIcon({ className: 'lbl', html: '<span>' + fmt(c.cota, c.cota % 1 ? 1 : 0) + '</span>', iconSize: [0, 0] }) }).addTo(camadaRotulos);
+          rotulosN++;
+        }
+      });
+    });
+    $('legenda').style.display = r.curvas.length ? 'block' : 'none';
+  }
+
+  function mostrarResultado(g, r, eq, mestraCada, passes, nLinhas, ms) {
+    var mpp = 156543.03392 * Math.cos(L.latLngBounds(vertices).getCenter().lat * Math.PI / 180) / Math.pow(2, g.z);
+    var fuso = fusoAtual(), epsg = C.epsgSirgas(fuso, vertices[0].lat < 0);
+    var linhas = [
+      ['Área do polígono', formatarArea(areaM2())],
+      ['Altitude mín / máx', isFinite(r.min) ? fmt(r.min, 1) + ' m / ' + fmt(r.max, 1) + ' m' : '—'],
+      ['Altitude média', isFinite(r.media) ? fmt(r.media, 1) + ' m' : '—'],
+      ['Desnível', isFinite(r.min) ? fmt(r.max - r.min, 1) + ' m' : '—'],
+      ['Curvas', r.curvas.length + ' cotas (' + nLinhas + ' linhas) — equidistância ' + fmt(eq, eq % 1 ? 1 : 0) + ' m, mestra a cada ' + fmt(eq * mestraCada, (eq * mestraCada) % 1 ? 1 : 0) + ' m'],
+      ['Grid de cálculo', g.w + ' × ' + g.h + ' nós, ~' + fmt(mpp, 1) + ' m (zoom ' + g.z + '), suavização ' + passes + 'x'],
+      ['DXF / CSV em', 'SIRGAS 2000 / UTM ' + fuso + (vertices[0].lat < 0 ? 'S' : 'N') + (epsg ? ' (EPSG:' + epsg + ')' : '')]
+    ];
+    $('tabRes').innerHTML = linhas.map(function (l) { return '<tr><td>' + l[0] + '</td><td>' + l[1] + '</td></tr>'; }).join('');
+    $('resultado').style.display = 'block';
+  }
+
+  // ---------------- Exportar ----------------
+  function baixar(nome, conteudo, tipo) {
+    var blob = new Blob([conteudo], { type: tipo });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = nome;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  }
+  function nomeBase() { return ($('nome').value || 'area').replace(/[^\w\-]+/g, '_') + '_curvas_' + String(ultimo.eq).replace('.', ',') + 'm'; }
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+  $('btGeojson').onclick = function () {
+    if (!ultimo) return;
+    var feats = [];
+    ultimo.r.curvas.forEach(function (c) {
+      c.ll.forEach(function (l) {
+        feats.push({ type: 'Feature', properties: { cota: c.cota, tipo: c.mestra ? 'mestra' : 'intermediaria' },
+          geometry: { type: 'LineString', coordinates: l.map(function (p) { return [+p[1].toFixed(8), +p[0].toFixed(8), c.cota]; }) } });
+      });
+    });
+    var anel = vertices.map(function (v) { return [+v.lng.toFixed(8), +v.lat.toFixed(8)]; }); anel.push(anel[0]);
+    feats.push({ type: 'Feature', properties: { tipo: 'poligono' }, geometry: { type: 'Polygon', coordinates: [anel] } });
+    baixar(nomeBase() + '.geojson', JSON.stringify({ type: 'FeatureCollection', features: feats }), 'application/geo+json');
+  };
+
+  $('btKml').onclick = function () {
+    if (!ultimo) return;
+    var s = ['<?xml version="1.0" encoding="UTF-8"?>', '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>',
+      '<name>' + esc(nomeBase()) + '</name>',
+      '<Style id="mestra"><LineStyle><color>ff1a8cff</color><width>3</width></LineStyle></Style>',
+      '<Style id="inter"><LineStyle><color>ff7ad2ff</color><width>1.5</width></LineStyle></Style>',
+      '<Style id="poly"><LineStyle><color>ff1a8cff</color><width>2.5</width></LineStyle><PolyStyle><fill>0</fill></PolyStyle></Style>',
+      '<Placemark><name>Polígono</name><styleUrl>#poly</styleUrl><Polygon><tessellate>1</tessellate><outerBoundaryIs><LinearRing><coordinates>' +
+        vertices.concat([vertices[0]]).map(function (v) { return v.lng.toFixed(8) + ',' + v.lat.toFixed(8) + ',0'; }).join(' ') +
+      '</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>', '<Folder><name>Curvas de nível</name>'];
+    ultimo.r.curvas.forEach(function (c) {
+      c.ll.forEach(function (l) {
+        s.push('<Placemark><name>' + c.cota + ' m</name><styleUrl>#' + (c.mestra ? 'mestra' : 'inter') + '</styleUrl>' +
+          '<ExtendedData><Data name="cota"><value>' + c.cota + '</value></Data><Data name="tipo"><value>' + (c.mestra ? 'mestra' : 'intermediaria') + '</value></Data></ExtendedData>' +
+          '<LineString><tessellate>1</tessellate><altitudeMode>clampToGround</altitudeMode><coordinates>' +
+          l.map(function (p) { return p[1].toFixed(8) + ',' + p[0].toFixed(8) + ',' + c.cota; }).join(' ') +
+          '</coordinates></LineString></Placemark>');
+      });
+    });
+    s.push('</Folder></Document></kml>');
+    baixar(nomeBase() + '.kml', s.join('\n'), 'application/vnd.google-earth.kml+xml');
+  };
+
+  // DXF R12 (abre no QGIS, AutoCAD, BricsCAD, GstarCAD…) — POLYLINE 3D com a cota no Z
+  $('btDxf').onclick = function () {
+    if (!ultimo) return;
+    var fuso = fusoAtual(), o = [];
+    function g(c, v) { o.push(c, v); }
+    function poli(layer, pts, z, fechada) {
+      g(0, 'POLYLINE'); g(8, layer); g(66, 1); g(10, 0); g(20, 0); g(30, 0); g(70, fechada ? 9 : 8);
+      pts.forEach(function (p) { g(0, 'VERTEX'); g(8, layer); g(10, p[0].toFixed(3)); g(20, p[1].toFixed(3)); g(30, z.toFixed(3)); g(70, 32); });
+      g(0, 'SEQEND'); g(8, layer);
+    }
+    g(0, 'SECTION'); g(2, 'TABLES'); g(0, 'TABLE'); g(2, 'LAYER'); g(70, 3);
+    [['CURVAS_MESTRAS', 30], ['CURVAS_INTERMEDIARIAS', 51], ['POLIGONO', 1], ['COTAS', 7]].forEach(function (ly) {
+      g(0, 'LAYER'); g(2, ly[0]); g(70, 0); g(62, ly[1]); g(6, 'CONTINUOUS');
+    });
+    g(0, 'ENDTAB'); g(0, 'ENDSEC');
+    g(0, 'SECTION'); g(2, 'ENTITIES');
+    poli('POLIGONO', vertices.map(function (v) { return C.utm(v.lat, v.lng, fuso); }), 0, true);
+    var altTxt = Math.max(1, Math.sqrt(areaM2()) / 120);
+    ultimo.r.curvas.forEach(function (c) {
+      c.ll.forEach(function (l) {
+        var pts = l.map(function (p) { return C.utm(p[0], p[1], fuso); });
+        poli(c.mestra ? 'CURVAS_MESTRAS' : 'CURVAS_INTERMEDIARIAS', pts, c.cota, false);
+        if (c.mestra && pts.length > 8) {
+          var m = pts[Math.floor(pts.length / 2)];
+          g(0, 'TEXT'); g(8, 'COTAS'); g(10, m[0].toFixed(3)); g(20, m[1].toFixed(3)); g(30, c.cota.toFixed(3)); g(40, altTxt.toFixed(2)); g(1, String(c.cota));
+        }
+      });
+    });
+    g(0, 'ENDSEC'); g(0, 'EOF');
+    baixar(nomeBase() + '_UTM' + fuso + '.dxf', o.join('\r\n') + '\r\n', 'application/dxf');
+  };
+
+  // Pontos do modelo dentro do polígono (para interpolar no QGIS/Metashape/CAD)
+  $('btCsv').onclick = function () {
+    if (!ultimo) return;
+    var g = ultimo.g, fuso = fusoAtual(), poly = vertices.map(function (v) { return latLngParaGrid(g, v.lat, v.lng); });
+    var linhas = ['id;latitude;longitude;E_utm;N_utm;altitude_m'], id = 1;
+    for (var y = 0; y < g.h; y++) for (var x = 0; x < g.w; x++) {
+      if (!C.dentro([x, y], poly)) continue;
+      var ll = gridParaLatLng(g, x, y), en = C.utm(ll[0], ll[1], fuso);
+      linhas.push([id++, ll[0].toFixed(8), ll[1].toFixed(8), en[0].toFixed(3), en[1].toFixed(3), g.grid[y * g.w + x].toFixed(2)].join(';').replace(/\./g, ','));
+    }
+    baixar(nomeBase().replace('_curvas_', '_pontos_') + '_UTM' + fuso + '.csv', '﻿' + linhas.join('\r\n'), 'text/csv');
+  };
+
+  // ---------------- PWA ----------------
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  }
+})();
+</script>
+</body>
+</html>
