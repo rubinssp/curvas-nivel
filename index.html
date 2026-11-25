@@ -530,7 +530,12 @@
     if (!ultimo) return;
     var g = ultimo.g, fuso = fusoAtual(), poly = vertices.map(function (v) { return latLngParaGrid(g, v.lat, v.lng); });
     var linhas = ['id;latitude;longitude;E_utm;N_utm;altitude_m'], id = 1;
-    for (var y = 0; y < g.h; y++) for (var x = 0; x < g.w; x++) {
+    // espaçamento: no mínimo ~10 m (o SRTM tem ~30 m) e no máximo ~50 mil pontos
+    var mpp = 156543.03392 * Math.cos(vertices[0].lat * Math.PI / 180) / Math.pow(2, g.z);
+    var nDentro = 0;
+    for (var yy = 0; yy < g.h; yy += 2) for (var xx = 0; xx < g.w; xx += 2) if (C.dentro([xx, yy], poly)) nDentro += 4;
+    var passo = Math.max(1, Math.ceil(10 / mpp), Math.ceil(Math.sqrt(nDentro / 50000)));
+    for (var y = 0; y < g.h; y += passo) for (var x = 0; x < g.w; x += passo) {
       if (!C.dentro([x, y], poly)) continue;
       var ll = gridParaLatLng(g, x, y), en = C.utm(ll[0], ll[1], fuso);
       linhas.push([id++, ll[0].toFixed(8), ll[1].toFixed(8), en[0].toFixed(3), en[1].toFixed(3), g.grid[y * g.w + x].toFixed(2)].join(';').replace(/\./g, ','));

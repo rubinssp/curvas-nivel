@@ -1,5 +1,5 @@
 // Guarda o app no aparelho. Imagem de satélite e altitudes sempre vêm da internet.
-const CACHE = 'curvas-nivel-v1';
+const CACHE = 'curvas-nivel-v2';
 const APP = ['./', 'index.html', 'curvas.js', 'manifest.webmanifest', 'icon.svg',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css', 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'];
 
